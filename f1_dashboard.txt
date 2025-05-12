@@ -1,0 +1,1028 @@
+import streamlit as st
+import pandas as pd
+import requests
+import plotly.express as px
+import plotly.graph_objects as go
+import time
+from datetime import datetime
+
+# Set page configuration with a custom theme and dark mode
+st.set_page_config(
+    page_title="F1 Explorer",
+    page_icon="🏎️",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+# Custom CSS for styling with dark theme
+st.markdown("""
+<style>
+    /* Dark theme */
+    body {
+        background-color: #15151e;
+        color: #ffffff;
+    }
+    
+    .main-header {
+        font-size: 2.5rem;
+        color: #e10600;
+        font-weight: 800;
+        text-align: center;
+        margin-bottom: 1rem;
+        text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    .subheader {
+        font-size: 1.5rem;
+        color: #ffffff;
+        font-weight: 600;
+        margin-top: 1rem;
+        border-bottom: 2px solid #e10600;
+        padding-bottom: 0.3rem;
+    }
+    
+    .card {
+        background-color: #1e1e2d;
+        border-radius: 10px;
+        padding: 1.5rem;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        margin-bottom: 1rem;
+        border: 1px solid #2c2c3a;
+    }
+    
+    .info-text {
+        color: #d1d1d1;
+        font-size: 0.9rem;
+    }
+    
+    .highlight {
+        background-color: #e10600;
+        padding: 0.2rem 0.5rem;
+        color: white;
+        border-radius: 4px;
+        font-weight: 600;
+    }
+    
+    .sidebar-content {
+        background-color: #1e1e2d;
+        padding: 1rem;
+        border-radius: 10px;
+        color: white;
+        border: 1px solid #2c2c3a;
+    }
+    
+    /* Custom tab styling */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 0;
+        background-color: #15151e;
+        border-radius: 10px;
+        padding: 5px;
+    }
+    
+    .stTabs [data-baseweb="tab"] {
+        height: 50px;
+        white-space: pre-wrap;
+        background-color: #1e1e2d;
+        border-radius: 5px;
+        margin-right: 5px;
+        padding: 10px 20px;
+        font-weight: 600;
+        border: none;
+    }
+    
+    .stTabs [aria-selected="true"] {
+        background-color: #e10600 !important;
+        color: white !important;
+    }
+    
+    /* Remove whitespace */
+    .block-container {
+        padding-top: 1rem;
+        padding-bottom: 0rem;
+    }
+    
+    div[data-testid="stVerticalBlock"] {
+        gap: 0.5rem;
+    }
+    
+    /* Style dataframes */
+    div[data-testid="stDataFrame"] {
+        width: 100%;
+    }
+    
+    div[data-testid="stDataFrame"] > div {
+        background-color: #1e1e2d;
+        border-radius: 10px;
+        padding: 0.5rem;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        border: 1px solid #2c2c3a;
+    }
+    
+    /* Remove extra padding from Streamlit containers */
+    .css-1544g2n.e1tzin5v4 {
+        padding: 1rem 1rem 0rem 1rem;
+        margin: 0;
+    }
+    
+    .css-9ycgxx.exg6vvm3 {
+        padding-bottom: 0;
+    }
+    
+    /* Fix container margins */
+    .element-container {
+        margin-bottom: 1rem;
+    }
+    
+    /* Additional race styling */
+    .race-info {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 1rem;
+        color: white;
+    }
+    
+    .loading-spinner {
+        text-align: center;
+        margin: 2rem 0;
+    }
+    
+    /* Fix white bar */
+    .stApp {
+        background-color: #15151e;
+    }
+    
+    div.stTabs > div:first-of-type > div:first-of-type > div:last-child {
+        background-color: transparent !important;
+        border: none !important;
+    }
+    
+    .css-10pw50, .css-1cpxqw2 {
+        background-color: #15151e !important;
+    }
+    
+    /* Fix tab content area */
+    div.stTabs > div:nth-child(2) {
+        background-color: #15151e !important;
+        padding: 0 !important;
+        border: none !important;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# Base API call with loading indicator
+@st.cache_data(ttl=3600)
+def get_f1_data(endpoint):
+    BASE_URL = "http://api.jolpi.ca/ergast/f1"
+    url = f"{BASE_URL}/{endpoint}"
+    try:
+        resp = requests.get(url)
+        if resp.status_code == 200:
+            return resp.json()
+        else:
+            st.error(f"API error {resp.status_code}: Could not fetch data from {endpoint}")
+            return None
+    except Exception as e:
+        st.error(f"Connection error: {str(e)}")
+        return None
+
+# Create F1-style color scheme for teams
+def get_team_colors():
+    return {
+        'Red Bull': '#0600EF',
+        'Ferrari': '#DC0000',
+        'Mercedes': '#00D2BE',
+        'McLaren': '#FF8700',
+        'Aston Martin': '#006F62',
+        'Alpine': '#0090FF',
+        'Williams': '#005AFF',
+        'AlphaTauri': '#2B4562',
+        'Alfa Romeo': '#900000',
+        'Haas F1 Team': '#FFFFFF',
+        'Racing Point': '#F596C8',
+        'Renault': '#FFF500',
+        'Toro Rosso': '#469BFF',
+        'Sauber': '#9B0000',
+        'Force India': '#FF80C7',
+        'Manor Marussia': '#323232',
+        'Lotus F1': '#FFB800',
+        'Marussia': '#6E0000',
+        'Caterham': '#00A014',
+        'Lotus': '#FFB800',
+        'HRT': '#858585',
+        'Virgin': '#C81118',
+        'Brawn': '#00FF00',
+        'Toyota': '#FF1E00',
+        'Super Aguri': '#E2001A',
+        'Honda': '#0D0028',
+        'Spyker': '#FF6600',
+        'Red Bull Racing': '#0600EF',
+        'Midland': '#FF6600',
+        'BMW Sauber': '#006DF0',
+        'RBR-Honda': '#0600EF',
+        'RB F1 Team': '#0600EF',
+        'VCARB': '#5E8FAA'
+    }
+
+# Explicit parsers for each endpoint to ensure reliable columns
+@st.cache_data(ttl=3600)
+def parse_driver_standings(year):
+    data = get_f1_data(f"{year}/driverStandings.json")
+    if not data:
+        return pd.DataFrame()
+    
+    lst = data['MRData']['StandingsTable']['StandingsLists'][0]['DriverStandings']
+    rows = []
+    for e in lst:
+        rows.append({
+            'Position': int(e['position']),
+            'Driver': f"{e['Driver']['givenName']} {e['Driver']['familyName']}",
+            'Constructor': e['Constructors'][0]['name'],
+            'Points': float(e['points']),
+            'Wins': int(e['wins'])
+        })
+    return pd.DataFrame(rows)
+
+@st.cache_data(ttl=3600)
+def parse_constructor_standings(year):
+    data = get_f1_data(f"{year}/constructorStandings.json")
+    if not data:
+        return pd.DataFrame()
+    
+    lst = data['MRData']['StandingsTable']['StandingsLists'][0]['ConstructorStandings']
+    rows = []
+    for e in lst:
+        rows.append({
+            'Position': int(e['position']),
+            'Constructor': e['Constructor']['name'],
+            'Points': float(e['points']),
+            'Wins': int(e['wins'])
+        })
+    return pd.DataFrame(rows)
+
+@st.cache_data(ttl=3600)
+def parse_races(year):
+    data = get_f1_data(f"{year}/races.json")
+    if not data:
+        return pd.DataFrame()
+    
+    lst = data['MRData']['RaceTable']['Races']
+    df = pd.json_normalize(lst)
+    df['date'] = pd.to_datetime(df['date'])
+    
+    # Add a column for races that have already happened
+    current_date = datetime.now()
+    df['completed'] = df['date'] < current_date
+    
+    return df
+
+@st.cache_data(ttl=3600)
+def parse_results(year, rnd):
+    data = get_f1_data(f"{year}/{rnd}/results.json")
+    if not data or 'MRData' not in data or 'RaceTable' not in data['MRData'] or 'Races' not in data['MRData']['RaceTable'] or len(data['MRData']['RaceTable']['Races']) == 0:
+        return pd.DataFrame()
+    
+    lst = data['MRData']['RaceTable']['Races'][0]['Results']
+    rows = []
+    for e in lst:
+        time = e.get('Time', {}).get('time', None)
+        rows.append({
+            'Position': int(e['position']),
+            'Driver': f"{e['Driver']['givenName']} {e['Driver']['familyName']}",
+            'Constructor': e['Constructor']['name'],
+            'Grid': int(e['grid']),
+            'Laps': int(e['laps']),
+            'Time': time,
+            'Status': e['status'],
+            'Points': float(e['points'])
+        })
+    return pd.DataFrame(rows)
+
+@st.cache_data(ttl=3600)
+def parse_qualifying(year, rnd):
+    data = get_f1_data(f"{year}/{rnd}/qualifying.json")
+    if not data or 'MRData' not in data or 'RaceTable' not in data['MRData'] or 'Races' not in data['MRData']['RaceTable'] or len(data['MRData']['RaceTable']['Races']) == 0:
+        return pd.DataFrame()
+    
+    lst = data['MRData']['RaceTable']['Races'][0].get('QualifyingResults', [])
+    rows = []
+    for e in lst:
+        rows.append({
+            'Position': int(e['position']),
+            'Driver': f"{e['Driver']['givenName']} {e['Driver']['familyName']}",
+            'Constructor': e['Constructor']['name'],
+            'Q1': e.get('Q1'), 'Q2': e.get('Q2'), 'Q3': e.get('Q3')
+        })
+    return pd.DataFrame(rows)
+
+@st.cache_data(ttl=3600)
+def parse_sprint(year, rnd):
+    data = get_f1_data(f"{year}/{rnd}/sprint.json")
+    if not data:
+        return pd.DataFrame()
+    
+    mr = data.get('MRData', {})
+    # Safely get Sprint Races
+    sprint_info = mr.get('SprintTable', {}).get('Races', [])
+    if not sprint_info:
+        return pd.DataFrame()
+    
+    results_list = sprint_info[0].get('SprintResults', [])
+    rows = []
+    for e in results_list:
+        time_str = e.get('Time', {}).get('time', "")
+        rows.append({
+            'Position': int(e['position']),
+            'Driver': f"{e['Driver']['givenName']} {e['Driver']['familyName']}",
+            'Constructor': e['Constructor']['name'],
+            'Time': time_str,
+            'Points': float(e['points'])
+        })
+    return pd.DataFrame(rows)
+
+@st.cache_data(ttl=3600)
+def parse_pitstops(year, rnd):
+    data = get_f1_data(f"{year}/{rnd}/pitstops.json")
+    if not data or 'MRData' not in data or 'RaceTable' not in data['MRData'] or 'Races' not in data['MRData']['RaceTable'] or len(data['MRData']['RaceTable']['Races']) == 0:
+        return pd.DataFrame()
+    
+    lst = data['MRData']['RaceTable']['Races'][0].get('PitStops', [])
+    rows = []
+    for e in lst:
+        rows.append({
+            'DriverID': e['driverId'],
+            'Stop': int(e['stop']),
+            'Lap': int(e['lap']),
+            'Duration': e['duration']
+        })
+    return pd.DataFrame(rows)
+
+@st.cache_data(ttl=3600)
+def parse_laps(year, rnd, driver_id=None):
+    # Safely fetch lap data; may not exist for all rounds/drivers
+    ep = f"{year}/{rnd}/laps.json"
+    if driver_id:
+        ep = f"{year}/{rnd}/drivers/{driver_id}/laps.json"
+    
+    data = get_f1_data(ep)
+    if not data:
+        return pd.DataFrame()
+    
+    mr = data.get('MRData', {})
+    # Navigate to RaceTable → Races → Laps
+    races = mr.get('RaceTable', {}).get('Races', [])
+    if not races or 'Laps' not in races[0]:
+        return pd.DataFrame()
+    
+    laps_list = races[0].get('Laps', [])
+    rows = []
+    for lap in laps_list:
+        lap_num = int(lap.get('number', 0))
+        timings = lap.get('Timings', [])
+        for e in timings:
+            rows.append({
+                'Lap': lap_num,
+                'DriverID': e.get('driverId'),
+                'Time': e.get('time')
+            })
+    
+    # Convert times to seconds for better visualization
+    if not rows:
+        return pd.DataFrame()
+    
+    df = pd.DataFrame(rows)
+    return df
+
+# Helper function to get race details for header
+@st.cache_data(ttl=3600)
+def get_race_details(year, rnd):
+    races = parse_races(year)
+    if races.empty:
+        return None
+    
+    try:
+        race = races[races['round'] == rnd].iloc[0]
+        return {
+            'name': race.get('raceName', f"Round {rnd}"),
+            'circuit': race.get('Circuit.circuitName', ""),
+            'date': race.get('date', ""),
+            'locality': race.get('Circuit.Location.locality', ""),
+            'country': race.get('Circuit.Location.country', ""),
+        }
+    except:
+        return None
+
+# Create visualizations for different sections
+def create_driver_standings_chart(df):
+    if df.empty:
+        return None
+    
+    team_colors = get_team_colors()
+    
+    # Create a copy for plotting and sort by position
+    plot_df = df.copy().sort_values('Position')
+    
+    # Create list of colors matching each constructor
+    colors = [team_colors.get(constructor, '#333333') for constructor in plot_df['Constructor']]
+    
+    fig = px.bar(
+        plot_df, 
+        x='Driver', 
+        y='Points',
+        text='Points',
+        color='Constructor',
+        color_discrete_map={team: color for team, color in zip(plot_df['Constructor'], colors)},
+        height=500,
+    )
+    
+    fig.update_layout(
+        title="Driver Championship Points",
+        xaxis_title="",
+        yaxis_title="Points",
+        plot_bgcolor='rgba(0,0,0,0)',
+        paper_bgcolor='rgba(0,0,0,0)',
+        xaxis={'categoryorder':'total descending'},
+        showlegend=True,
+        legend_title_text='Constructor',
+        margin=dict(l=0, r=0, t=50, b=0),
+    )
+    
+    fig.update_traces(
+        texttemplate='%{text:.1f}',
+        textposition='outside',
+        marker_line_width=0,
+        opacity=0.9,
+    )
+    
+    return fig
+
+def create_constructor_standings_chart(df):
+    if df.empty:
+        return None
+    
+    team_colors = get_team_colors()
+    
+    # Create a copy for plotting and sort by position
+    plot_df = df.copy().sort_values('Position')
+    
+    # Create list of colors matching each constructor
+    colors = [team_colors.get(constructor, '#333333') for constructor in plot_df['Constructor']]
+    
+    fig = px.bar(
+        plot_df, 
+        x='Constructor', 
+        y='Points',
+        text='Points',
+        color='Constructor',
+        color_discrete_map={team: color for team, color in zip(plot_df['Constructor'], colors)},
+        height=400,
+    )
+    
+    fig.update_layout(
+        title="Constructor Championship Points",
+        xaxis_title="",
+        yaxis_title="Points",
+        plot_bgcolor='rgba(0,0,0,0)',
+        paper_bgcolor='rgba(0,0,0,0)',
+        xaxis={'categoryorder':'total descending'},
+        showlegend=False,
+        margin=dict(l=0, r=0, t=50, b=0),
+    )
+    
+    fig.update_traces(
+        texttemplate='%{text:.1f}',
+        textposition='outside',
+        marker_line_width=0,
+        opacity=0.9,
+    )
+    
+    return fig
+
+def create_calendar_map(races_df):
+    if races_df.empty:
+        return None
+    
+    # Check if we have location data
+    if not ('Circuit.Location.lat' in races_df.columns and 'Circuit.Location.long' in races_df.columns):
+        return None
+    
+    # Create a DataFrame for mapping
+    map_df = races_df[['round', 'raceName', 'Circuit.circuitName', 'date', 'Circuit.Location.lat', 'Circuit.Location.long', 'completed']].copy()
+    map_df.rename(columns={
+        'Circuit.Location.lat': 'lat',
+        'Circuit.Location.long': 'lon',
+        'raceName': 'Race',
+        'Circuit.circuitName': 'Circuit'
+    }, inplace=True)
+    
+    # Map colors based on race status (completed or upcoming)
+    colors = map_df['completed'].map({True: 'red', False: 'blue'})
+    
+    fig = px.scatter_geo(
+        map_df,
+        lat='lat',
+        lon='lon',
+        hover_name='Race',
+        hover_data=['Circuit', 'date'],
+        color=map_df['completed'].map({True: 'Completed', False: 'Upcoming'}),
+        color_discrete_map={'Completed': '#e10600', 'Upcoming': '#0600EF'},
+        size=[10] * len(map_df),
+        projection="natural earth",
+        title="F1 Race Calendar",
+        height=500,
+    )
+    
+    fig.update_layout(
+        margin=dict(l=0, r=0, t=50, b=0),
+        paper_bgcolor='rgba(0,0,0,0)',
+        geo=dict(
+            showland=True,
+            landcolor='rgb(243, 243, 243)',
+            countrycolor='rgb(204, 204, 204)',
+            showcountries=True,
+            showocean=True,
+            oceancolor='rgb(234, 242, 252)',
+            showlakes=True,
+            lakecolor='rgb(234, 242, 252)',
+        ),
+    )
+    
+    return fig
+
+def create_lap_times_chart(laps_df, driver_id=None):
+    if laps_df.empty:
+        return None
+    
+    # Convert lap times to seconds for better visualization
+    def time_to_seconds(time_str):
+        if not time_str:
+            return None
+        try:
+            minutes, rest = time_str.split(':')
+            seconds = float(rest)
+            return int(minutes) * 60 + seconds
+        except:
+            return None
+    
+    # Process lap times
+    laps_df['TimeSeconds'] = laps_df['Time'].apply(time_to_seconds)
+    
+    # Filter by driver if specified
+    if driver_id:
+        filtered_df = laps_df[laps_df['DriverID'] == driver_id]
+    else:
+        filtered_df = laps_df
+    
+    if filtered_df.empty:
+        return None
+    
+    # Create line chart
+    fig = px.line(
+        filtered_df, 
+        x='Lap', 
+        y='TimeSeconds',
+        color='DriverID',
+        labels={'TimeSeconds': 'Lap Time (seconds)', 'Lap': 'Lap Number'},
+        title=f"Lap Times" + (f" for {driver_id}" if driver_id else ""),
+        height=400,
+    )
+    
+    fig.update_layout(
+        xaxis=dict(
+            dtick=1,
+            title="Lap Number",
+        ),
+        yaxis=dict(
+            title="Lap Time (seconds)",
+        ),
+        plot_bgcolor='rgba(0,0,0,0)',
+        paper_bgcolor='rgba(0,0,0,0)',
+        margin=dict(l=0, r=0, t=50, b=0),
+    )
+    
+    return fig
+
+def create_race_results_positions(results_df):
+    if results_df.empty:
+        return None
+    
+    team_colors = get_team_colors()
+    
+    # Create a copy for plotting
+    plot_df = results_df.copy()
+    
+    # Create a color mapping for each constructor
+    constructor_colors = {constructor: team_colors.get(constructor, '#333333') 
+                         for constructor in plot_df['Constructor'].unique()}
+    
+    # Set up position gain/loss
+    plot_df['PositionChange'] = plot_df['Grid'] - plot_df['Position'].astype(int)
+    plot_df['ChangeColor'] = plot_df['PositionChange'].apply(
+        lambda x: 'green' if x > 0 else ('red' if x < 0 else 'gray')
+    )
+    
+    # Create horizontal bar chart for position changes
+    fig = go.Figure()
+    
+    # Sort by finishing position
+    plot_df = plot_df.sort_values('Position')
+    
+    # Add bars for each driver
+    for _, row in plot_df.iterrows():
+        fig.add_trace(go.Bar(
+            y=[row['Driver']],
+            x=[abs(row['PositionChange'])] if row['PositionChange'] != 0 else [0.5],
+            orientation='h',
+            marker_color=row['ChangeColor'] if row['PositionChange'] != 0 else 'gray',
+            text=f"{'+' if row['PositionChange'] > 0 else ''}{row['PositionChange']}" if row['PositionChange'] != 0 else 'No change',
+            textposition='outside',
+            name=row['Driver'],
+            showlegend=False,
+            hoverinfo='text',
+            hovertext=f"{row['Driver']} ({row['Constructor']})<br>Start: P{row['Grid']}<br>Finish: P{row['Position']}<br>Change: {'+' if row['PositionChange'] > 0 else ''}{row['PositionChange']}"
+        ))
+    
+    # Customize layout
+    fig.update_layout(
+        title="Position Changes (Start → Finish)",
+        xaxis_title="Positions Gained/Lost",
+        yaxis_title="",
+        barmode='relative',
+        plot_bgcolor='rgba(0,0,0,0)',
+        paper_bgcolor='rgba(0,0,0,0)',
+        height=min(400, 100 + 30 * len(plot_df)),  # Dynamic height based on number of drivers
+        margin=dict(l=0, r=0, t=50, b=0),
+    )
+    
+    return fig
+
+# Title with dynamic F1 logo and styling
+st.markdown('<h1 class="main-header">🏎️ F1 Explorer Dashboard</h1>', unsafe_allow_html=True)
+
+# Sidebar for controls
+with st.sidebar:
+    st.markdown('<div class="sidebar-content">', unsafe_allow_html=True)
+    
+    # Year selection
+    years = list(range(2000, datetime.now().year + 1))
+    year = st.selectbox("Select Season", years, index=len(years)-1)
+    
+    # Display current standings leaders
+    ds = parse_driver_standings(year)
+    cs = parse_constructor_standings(year)
+    
+    if not ds.empty:
+        leader = ds.iloc[0]
+        st.markdown(f"""
+        <div style="margin-top: 20px; padding: 10px; background-color: rgba(255,255,255,0.1); border-radius: 5px;">
+            <h3 style="margin: 0; font-size: 1rem;">Current Leaders</h3>
+            <p style="margin-bottom: 5px; font-size: 0.9rem;">
+                <span style="color: #e10600; font-weight: bold;">Driver:</span> {leader['Driver']} ({leader['Points']} pts)
+            </p>
+            <p style="margin: 0; font-size: 0.9rem;">
+                <span style="color: #e10600; font-weight: bold;">Constructor:</span> {cs.iloc[0]['Constructor']} ({cs.iloc[0]['Points']} pts)
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Add F1 information
+    st.markdown("""
+    <div style="margin-top: 20px; padding: 10px; font-size: 0.8rem; color: #999;">
+        <p>Built with 💻 and ❤️</p>
+        <p>Using Streamlit & Ergast F1 API</p>
+        <p>All F1 data © FIA Formula One World Championship</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+# Create tabs with enhanced styling
+tab1, tab2, tab3 = st.tabs(["📊 Championship", "🗓️ Calendar", "🏁 Race Analysis"])
+
+# Tab 1: Standings
+with tab1:
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    
+    # Show loading spinner while data loads
+    with st.spinner("Loading championship data..."):
+        ds = parse_driver_standings(year)
+        cs = parse_constructor_standings(year)
+    
+    if ds.empty or cs.empty:
+        st.info(f"No championship data available for {year}.")
+    else:
+        # Create two columns for standings
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown('<h2 class="subheader">Drivers Championship</h2>', unsafe_allow_html=True)
+            
+            # Format the dataframe
+            styled_ds = ds.style.apply(lambda x: ['background-color: #e10600; color: white' if i == 0 
+                                            else 'background-color: #0600EF; color: white' if i == 1 
+                                            else 'background-color: #FFC0CB; color: black' if i == 2 
+                                            else '' for i in range(len(x))], axis=0)
+            
+            st.dataframe(styled_ds, use_container_width=True)
+            
+            # Add visualization
+            driver_chart = create_driver_standings_chart(ds)
+            if driver_chart:
+                st.plotly_chart(driver_chart, use_container_width=True)
+        
+        with col2:
+            st.markdown('<h2 class="subheader">Constructors Championship</h2>', unsafe_allow_html=True)
+            
+            # Format the dataframe
+            styled_cs = cs.style.apply(lambda x: ['background-color: #e10600; color: white' if i == 0 
+                                            else 'background-color: #0600EF; color: white' if i == 1 
+                                            else 'background-color: #FFC0CB; color: black' if i == 2 
+                                            else '' for i in range(len(x))], axis=0)
+            
+            st.dataframe(styled_cs, use_container_width=True)
+            
+            # Add visualization
+            constructor_chart = create_constructor_standings_chart(cs)
+            if constructor_chart:
+                st.plotly_chart(constructor_chart, use_container_width=True)
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# Tab 2: Calendar
+with tab2:
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    
+    with st.spinner("Loading calendar data..."):
+        races = parse_races(year)
+    
+    if races.empty:
+        st.info(f"No calendar data available for {year}.")
+    else:
+        st.markdown('<h2 class="subheader">Season Calendar</h2>', unsafe_allow_html=True)
+        
+        # Create map visualization if location data exists
+        calendar_map = create_calendar_map(races)
+        if calendar_map:
+            st.plotly_chart(calendar_map, use_container_width=True)
+        
+        # Enhanced table formatting
+        calendar_df = races[['round', 'raceName', 'Circuit.circuitName', 'date']].rename(
+            columns={'round': 'Round', 'raceName': 'Race', 'Circuit.circuitName': 'Circuit', 'date': 'Date'}
+        ).copy()
+        
+        # Format date column
+        calendar_df['Date'] = calendar_df['Date'].dt.strftime('%d %b %Y')
+        
+        # Add next race indicator
+        current_date = datetime.now()
+        next_race_index = races[races['date'] > current_date].index.min()
+        
+        if pd.notnull(next_race_index):
+            next_race_round = races.loc[next_race_index, 'round']
+            styled_calendar = calendar_df.style.apply(
+                lambda x: ['background-color: #e10600; color: white' if r == next_race_round else '' 
+                          for r in calendar_df['Round']], axis=1
+            )
+            st.dataframe(styled_calendar, use_container_width=True)
+        else:
+            st.dataframe(calendar_df, use_container_width=True)
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# Tab 3: Race Details
+with tab3:
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    
+    with st.spinner("Loading race data..."):
+        races = parse_races(year)
+    
+    if races.empty:
+        st.info(f"No race data available for {year}.")
+    else:
+        # Race selector with enhanced UI
+        col1, col2 = st.columns([1, 2])
+        
+        with col1:
+            race_rounds = races['round'].tolist()
+            rnd = st.selectbox("Select Round", race_rounds)
+        
+        # Get race details
+        race_details = get_race_details(year, rnd)
+        
+        if race_details:
+            with col2:
+                st.markdown(f"""
+                <div class="race-info">
+                    <div>
+                        <h3 style="margin:0;">{race_details['name']}</h3>
+                        <p style="margin:0;">{race_details['circuit']}</p>
+                        <p style="margin:0; color:#666;">{race_details['locality']}, {race_details['country']}</p>
+                    </div>
+                    <div>
+                        <h4 style="margin:0;">{race_details['date'].strftime('%d %b %Y')}</h4>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+        
+        # Create tabs for different race data
+        race_tab1, race_tab2, race_tab3, race_tab4 = st.tabs(["🏆 Results", "⏱️ Qualifying", "🚀 Sprint", "📊 Analysis"])
+        
+        with race_tab1:
+            with st.spinner("Loading race results..."):
+                results_df = parse_results(year, rnd)
+            
+            if results_df.empty:
+                st.info("No race results available for this round.")
+            else:
+                st.markdown('<h3 class="subheader">Race Results</h3>', unsafe_allow_html=True)
+                
+                # Position change visualization
+                positions_chart = create_race_results_positions(results_df)
+                if positions_chart:
+                    st.plotly_chart(positions_chart, use_container_width=True)
+                
+                # Include only relevant columns first
+                display_cols = ['Position', 'Driver', 'Constructor', 'Grid', 'Status', 'Points']
+                if 'Time' in results_df.columns:
+                    display_cols.insert(5, 'Time')
+                
+                # Then style the filtered dataframe
+                styled_results = results_df[display_cols].style.apply(
+                    lambda x: ['background-color: #e10600; color: white' if pos == 1 
+                              else 'background-color: #0600EF; color: white' if pos == 2
+                              else 'background-color: #FFC0CB; color: black' if pos == 3
+                              else '' for pos in results_df['Position']], axis=0
+                )
+                
+                st.dataframe(styled_results, use_container_width=True)
+        
+        with race_tab2:
+            with st.spinner("Loading qualifying data..."):
+                quali_df = parse_qualifying(year, rnd)
+            
+            if quali_df.empty:
+                st.info("No qualifying results available for this round.")
+            else:
+                st.markdown('<h3 class="subheader">Qualifying Results</h3>', unsafe_allow_html=True)
+                
+                # Style the qualifying dataframe
+                styled_quali = quali_df.style.apply(
+                    lambda x: ['background-color: #e10600; color: white' if pos == 1 
+                              else 'background-color: #0600EF; color: white' if pos == 2
+                              else 'background-color: #FFC0CB; color: black' if pos == 3
+                              else '' for pos in quali_df['Position']], axis=0
+                )
+                
+                st.dataframe(styled_quali, use_container_width=True)
+                
+                # Add visualization - Q1, Q2, Q3 comparison if data exists
+                if 'Q1' in quali_df.columns and 'Q2' in quali_df.columns and 'Q3' in quali_df.columns:
+                    # Convert session times to seconds for comparison
+                    def session_to_seconds(time_str):
+                        if not isinstance(time_str, str):
+                            return None
+                        try:
+                            if ":" in time_str:
+                                minutes, rest = time_str.split(':')
+                                return int(minutes) * 60 + float(rest)
+                            else:
+                                return float(time_str)
+                        except:
+                            return None
+                    
+                    plot_df = quali_df.copy()
+                    for session in ['Q1', 'Q2', 'Q3']:
+                        if session in plot_df.columns:
+                            plot_df[f"{session}_seconds"] = plot_df[session].apply(session_to_seconds)
+                    
+                    # Filter drivers who participated in all sessions (front-runners)
+                    plot_df = plot_df.dropna(subset=['Q1_seconds', 'Q2_seconds', 'Q3_seconds'])
+                    
+                    if not plot_df.empty and len(plot_df) >= 3:  # Ensure we have enough data
+                        # Create session comparison chart
+                        fig = go.Figure()
+                        
+                        for session in ['Q1', 'Q2', 'Q3']:
+                            fig.add_trace(go.Bar(
+                                x=plot_df['Driver'],
+                                y=plot_df[f"{session}_seconds"],
+                                name=session,
+                                hovertemplate='%{y:.3f}s'
+                            ))
+                        
+                        fig.update_layout(
+                            title="Qualifying Session Comparison",
+                            xaxis_title="",
+                            yaxis_title="Time (seconds)",
+                            plot_bgcolor='rgba(0,0,0,0)',
+                            paper_bgcolor='rgba(0,0,0,0)',
+                            barmode='group',
+                            margin=dict(l=0, r=0, t=50, b=0),
+                        )
+                        
+                        st.plotly_chart(fig, use_container_width=True)
+        
+        with race_tab3:
+            with st.spinner("Loading sprint data..."):
+                sprint_df = parse_sprint(year, rnd)
+            
+            if sprint_df.empty:
+                st.info("No sprint results available for this round.")
+            else:
+                st.markdown('<h3 class="subheader">Sprint Results</h3>', unsafe_allow_html=True)
+                
+                # Style the sprint dataframe
+                styled_sprint = sprint_df.style.apply(
+                    lambda x: ['background-color: #e10600; color: white' if pos == 1 
+                              else 'background-color: #0600EF; color: white' if pos == 2
+                              else 'background-color: #FFC0CB; color: black' if pos == 3
+                              else '' for pos in sprint_df['Position']], axis=0
+                )
+                
+                st.dataframe(styled_sprint, use_container_width=True)
+        
+        with race_tab4:
+            st.markdown('<h3 class="subheader">Race Analysis</h3>', unsafe_allow_html=True)
+            
+            # Create multi-tab analysis
+            analysis_tab1, analysis_tab2 = st.tabs(["Lap Times", "Pit Stops"])
+            
+            with analysis_tab1:
+                with st.spinner("Loading lap data..."):
+                    # First get driver ID for selection
+                    results_df = parse_results(year, rnd) if results_df.empty else results_df
+                    
+                    if not results_df.empty:
+                        # Create driver selector
+                        drivers = results_df['Driver'].tolist()
+                        selected_driver = st.selectbox("Select Driver", drivers)
+                        
+                        # Extract driver_id from full name for API call (extract last name and use lowercase)
+                        driver_id = selected_driver.split()[-1].lower()
+                        
+                        # Get lap times for the selected driver
+                        lap_times_df = parse_laps(year, rnd, driver_id)
+                        
+                        if lap_times_df.empty:
+                            st.info(f"No lap time data available for {selected_driver}.")
+                        else:
+                            # Create lap time chart
+                            lap_chart = create_lap_times_chart(lap_times_df, driver_id)
+                            if lap_chart:
+                                st.plotly_chart(lap_chart, use_container_width=True)
+                            
+                            # Display table of lap times
+                            st.dataframe(lap_times_df, use_container_width=True)
+                    else:
+                        st.info("No race results available to select drivers.")
+            
+            with analysis_tab2:
+                with st.spinner("Loading pit stop data..."):
+                    pitstop_df = parse_pitstops(year, rnd)
+                
+                if pitstop_df.empty:
+                    st.info("No pit stop data available for this round.")
+                else:
+                    # Create a pit stop visualization
+                    fig = px.scatter(
+                        pitstop_df, 
+                        x='Lap', 
+                        y='DriverID',
+                        size=[3] * len(pitstop_df),
+                        color='Duration',
+                        color_continuous_scale='Reds_r',  # Red scale (reversed so darker = slower)
+                        title="Pit Stop Strategy",
+                        labels={'Lap': 'Lap Number', 'DriverID': 'Driver'},
+                        height=400,
+                    )
+                    
+                    fig.update_layout(
+                        xaxis=dict(
+                            title="Lap Number",
+                        ),
+                        yaxis=dict(
+                            title="",
+                            categoryorder='category ascending',
+                        ),
+                        plot_bgcolor='rgba(0,0,0,0)',
+                        paper_bgcolor='rgba(0,0,0,0)',
+                        margin=dict(l=0, r=0, t=50, b=0),
+                        coloraxis_colorbar=dict(
+                            title="Duration (s)",
+                        )
+                    )
+                    
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Show pit stop table
+                    st.dataframe(pitstop_df, use_container_width=True)
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# Footer
+st.markdown("""
+<div style="text-align: center; padding: 20px; margin-top: 30px; color: #666; font-size: 0.8rem;">
+    <p>F1 Explorer Dashboard | Updated for {current_year}</p>
+    <p>Data provided by Ergast F1 API | All F1 data © Formula One World Championship Ltd.</p>
+</div>
+""".format(current_year=datetime.now().year), unsafe_allow_html=True)
